@@ -76,7 +76,11 @@ pub fn start() {
                     if has_query_flag(&query(), "sample") {
                         let _ = app.run("file.newSample", serde_json::json!({}));
                     }
-                    Ok(Box::new(WebShell { app, inbox, graphics: creator_graphics }))
+                    let launched = Launched::default();
+                    if let Err(e) = listen_for_launch_files(launched.clone(), cc.egui_ctx.clone()) {
+                        log::error!("opening files from the system is unavailable: {e}");
+                    }
+                    Ok(Box::new(WebShell { app, inbox, launched, graphics: creator_graphics }))
                 }),
             )
             .await;
@@ -344,6 +348,8 @@ fn query() -> String {
 struct WebShell {
     app: DesignApp,
     inbox: Inbox,
+    /// Files the installed app was opened with ([`listen_for_launch_files`]).
+    launched: Launched,
     graphics: GraphicsState,
 }
 
@@ -366,6 +372,16 @@ impl eframe::App for WebShell {
                         Err(e) => log::error!("couldn't read dropped file {name}: {e}"),
                     }
                 });
+            }
+            let launched = std::mem::take(&mut *self.launched.borrow_mut());
+            for file in launched {
+                match file {
+                    Ok((name, bytes)) => {
+                        let request = self.app.import_request("open");
+                        self.inbox.lock().unwrap_or_else(|e| e.into_inner()).push(ImportedFile { request, name, bytes });
+                    }
+                    Err(e) => self.app.status_error("Open", e),
+                }
             }
             self.app.logic(ctx);
         });
@@ -416,6 +432,74 @@ fn services(inbox: Inbox, ctx: egui::Context) -> Services {
         inbox: Some(inbox),
         ..Default::default()
     }
+}
+
+/// Files the installed app was opened with, read (name, bytes) or not, waiting for the next frame.
+type Launched = std::rc::Rc<std::cell::RefCell<Vec<Result<(String, Vec<u8>), String>>>>;
+
+/// Most files one launch opens.
+const MAX_LAUNCH_FILES: u32 = 16;
+/// Largest file a launch opens (wasm memory is small; the browser reads the whole file).
+const MAX_LAUNCH_BYTES: f64 = (512u32 << 20) as f64;
+
+/// The installed app (`manifest.webmanifest`, `file_handlers`) opens `.designcraft` and IDML
+/// files from the system: a double-click or Open With in the file manager starts or focuses it,
+/// and Chromium's File Handling API hands the files to `window.launchQueue`. They open as
+/// File › Open opens them. Elsewhere (a browser tab, Firefox, Safari) there is no `launchQueue`
+/// or no files arrive, and nothing happens.
+fn listen_for_launch_files(launched: Launched, ctx: egui::Context) -> Result<(), String> {
+    let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
+    let window = web_sys::window().ok_or("no window")?;
+    let queue = js_sys::Reflect::get(&window, &wasm_bindgen::JsValue::from_str("launchQueue")).map_err(js)?;
+    if queue.is_undefined() || queue.is_null() {
+        return Ok(());
+    }
+    let set_consumer: js_sys::Function = js_sys::Reflect::get(&queue, &wasm_bindgen::JsValue::from_str("setConsumer"))
+        .map_err(js)?
+        .dyn_into()
+        .map_err(|_| "launchQueue.setConsumer is not a function".to_string())?;
+    let consumer = wasm_bindgen::closure::Closure::<dyn FnMut(wasm_bindgen::JsValue)>::new(move |params: wasm_bindgen::JsValue| {
+        let Ok(files) = js_sys::Reflect::get(&params, &wasm_bindgen::JsValue::from_str("files")) else { return };
+        if !js_sys::Array::is_array(&files) {
+            return;
+        }
+        let files = js_sys::Array::from(&files);
+        for i in 0..files.length().min(MAX_LAUNCH_FILES) {
+            let handle = files.get(i);
+            let launched = launched.clone();
+            let ctx = ctx.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                let file = read_launch_file(&handle).await;
+                if let Err(e) = &file {
+                    log::error!("couldn't read a file DesignCraft was opened with: {e}");
+                }
+                launched.borrow_mut().push(file);
+                ctx.request_repaint();
+            });
+        }
+    });
+    set_consumer.call1(&queue, consumer.as_ref().unchecked_ref()).map_err(js)?;
+    // The consumer lives as long as the page.
+    consumer.forget();
+    Ok(())
+}
+
+/// The name and bytes behind one of `launchQueue`'s file handles.
+async fn read_launch_file(handle: &wasm_bindgen::JsValue) -> Result<(String, Vec<u8>), String> {
+    let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
+    let get_file: js_sys::Function = js_sys::Reflect::get(handle, &wasm_bindgen::JsValue::from_str("getFile"))
+        .map_err(js)?
+        .dyn_into()
+        .map_err(|_| "not a file handle".to_string())?;
+    let promise: js_sys::Promise = get_file.call0(handle).map_err(js)?.dyn_into().map_err(|_| "getFile returned no promise".to_string())?;
+    let file: web_sys::File = wasm_bindgen_futures::JsFuture::from(promise).await.map_err(js)?.dyn_into().map_err(|_| "not a file".to_string())?;
+    let name = file.name();
+    let size = file.size();
+    if size.is_nan() || size > MAX_LAUNCH_BYTES {
+        return Err(format!("{name} is larger than 512 MB"));
+    }
+    let buffer = wasm_bindgen_futures::JsFuture::from(file.array_buffer()).await.map_err(js)?;
+    Ok((name, js_sys::Uint8Array::new(&buffer).to_vec()))
 }
 
 /// Trigger a browser download of `bytes` named after the last component of `path`.

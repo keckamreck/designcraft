@@ -1,0 +1,31 @@
+{
+  "name": "DesignCraft",
+  "short_name": "DesignCraft",
+  "description": "Open-source page layout: magazines, books, flyers and posters in the browser.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#262626",
+  "theme_color": "#262626",
+  "categories": ["design", "productivity", "graphics"],
+  "icons": [
+    { "src": "icons/designcraft-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/designcraft-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/designcraft-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "file_handlers": [
+    {
+      "action": "./",
+      "accept": {
+        "application/vnd.designcraft+zip": [".designcraft"],
+        "application/vnd.adobe.indesign-idml-package": [".idml"]
+      }
+    }
+  ],
+  "launch_handler": { "client_mode": ["focus-existing", "auto"] },
+  "shortcuts": [
+    { "name": "Sample magazine", "url": "./?sample" }
+  ]
+}

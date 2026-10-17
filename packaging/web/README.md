@@ -8,9 +8,47 @@ static site in `designcraft-web-<version>/`:
 | `index.html` | The page. It loads everything through relative URLs. |
 | `designcraft-web-<hash>.js` | wasm-bindgen glue (generated, ES module) |
 | `designcraft-web-<hash>_bg.wasm` | The app, about 13 MB, or 5 MB with compression |
+| `manifest.webmanifest`, `icons/` | Web app manifest and icons: the site installs as an app ([below](#install-as-an-app)) |
 | `_headers`, `.htaccess` | Sample header rules for Netlify/Cloudflare Pages and Apache |
 
 There is no server-side code. Upload the folder's contents anywhere that serves static files.
+
+## Deploy on Vercel
+
+The repository deploys to [Vercel](https://vercel.com) as it is: `vercel.json` at the root tells
+Vercel to run `packaging/web/vercel-build.sh` and serve `dist/web`, with the headers below.
+
+1. On vercel.com: **Add New… › Project**, import this GitHub repository and keep every setting
+   Vercel proposes (they come from `vercel.json`; there is no framework preset, no install step).
+2. **Deploy.** Every later push deploys again by itself: pushes to the default branch go to the
+   production URL, pushes to other branches get preview URLs.
+
+The build installs Rust (`RUST_TOOLCHAIN`, pinned in the script) and Trunk (pinned, SHA-256
+checked) on Vercel's build machine, and Trunk fetches wasm-bindgen and wasm-opt. A build from
+scratch takes about 15–25 minutes on Vercel's standard machine, within its 45-minute limit.
+With the Vercel CLI instead: `vercel` (preview) or `vercel --prod` from the repository root.
+
+## Install as an app
+
+The site is an installable web app (`manifest.webmanifest`): it opens in its own window with
+its own icon and no address bar, and the system lists it with its other apps.
+
+- **Chrome or Edge on Windows, macOS, Linux and ChromeOS:** the install icon at the right of the
+  address bar, or **⋮ › Cast, save and share › Install page as app**.
+- **Android (Chrome):** **⋮ › Add to home screen › Install**.
+- **iPad (Safari):** **Share › Add to Home Screen**.
+
+Installing needs HTTPS (Vercel serves it). There is no offline mode: the app loads from the
+site each time it starts (the large `.wasm` comes from the browser's cache after the first
+visit). Right-click (or long-press) the installed app's icon for **Sample magazine**.
+
+**Opening files from the system.** Installed from Chrome or Edge on a desktop or ChromeOS, the
+app registers for `.designcraft` and `.idml` files: double-click one, or use **Open With ›
+DesignCraft** in the file manager, and it opens in DesignCraft as File › Open would open it
+(the browser asks once whether to allow this). With DesignCraft already running, the file opens
+in that window. Files above 512 MB are refused. This uses the File Handling API
+(`launchQueue`), which other browsers and Android don't offer; there, use File › Open or drag
+the file onto the window.
 
 ## Any path works
 
