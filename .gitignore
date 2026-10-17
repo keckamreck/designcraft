@@ -10,3 +10,4 @@ plan/
 /target-*/
 /craft-fonts/
 /.vercel/
+/apps/designcraft-web/dist/
